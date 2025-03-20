@@ -5,17 +5,63 @@ import { createClient } from "@/utils/supabase/server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+export const googleSignUpAction = async () => {};
+
+export const googleSignInAction = async (formData: FormData) => {
+  // e.preventDefault();
+  console.log("Inside google sign in action");
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: "http://localhost:3000/auth/callback",
+    },
+  });
+  console.log("Data: ", data);
+  if (data.url) {
+    redirect(data.url); // use the redirect API for your server framework
+  }
+};
+
+//  check for new username and create if it does not exist in database
+export const checkUsername = async (username: string) => {
+  const supabase = await createClient();
+  const { data: users, error } = await supabase
+    .from("users")
+    .select("username");
+
+  if (error) {
+    console.log("Something went wrong when checking username ", error);
+  } else {
+    console.log("Username data: ", users);
+  }
+
+  return false;
+};
+
 export const signUpAction = async (formData: FormData) => {
+  const username = formData.get("username")?.toString();
   const email = formData.get("email")?.toString();
   const password = formData.get("password")?.toString();
   const supabase = await createClient();
   const origin = (await headers()).get("origin");
 
-  if (!email || !password) {
+  if (!email || !password || !username) {
     return encodedRedirect(
       "error",
       "/sign-up",
-      "Email and password are required",
+      "Email, username, and password are required"
+    );
+  }
+
+  const usernameExists: Boolean = await checkUsername(username);
+
+  if (usernameExists) {
+    console.log("Username already exists");
+    return encodedRedirect(
+      "error",
+      "/sign-up",
+      "Username already exists. Please choose another one"
     );
   }
 
@@ -31,18 +77,48 @@ export const signUpAction = async (formData: FormData) => {
     console.error(error.code + " " + error.message);
     return encodedRedirect("error", "/sign-up", error.message);
   } else {
+    // add code to add newly created user to public.users table with required fields....
+    const { data, error } = await supabase
+      .from("users")
+      .insert([{ username: username, email: email, provider: "supabase" }])
+      .select();
+
+    console.log("Data after adding user in users table: ", data);
+    console.log("Error after adding user in users table: ", error);
+
     return encodedRedirect(
       "success",
       "/sign-up",
-      "Thanks for signing up! Please check your email for a verification link.",
+      "Thanks for signing up! Please check your email for a verification link."
     );
   }
+
+  return encodedRedirect(
+    "error",
+    "/sign-up",
+    "Wait a bit please. still coding. YOU WILL BE IN SOON"
+  );
 };
 
 export const signInAction = async (formData: FormData) => {
-  const email = formData.get("email") as string;
+  const identifier = formData.get("identifier") as string;
   const password = formData.get("password") as string;
   const supabase = await createClient();
+  let email = identifier;
+
+  if (!identifier.includes("@")) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("email")
+      .eq("username", identifier)
+      .single();
+
+    if (!data || error) {
+      return encodedRedirect("error", "/sign-in", "Invalid username or email");
+    }
+
+    email = data.email;
+  }
 
   const { error } = await supabase.auth.signInWithPassword({
     email,
